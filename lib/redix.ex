@@ -346,13 +346,30 @@ defmodule Redix do
       :closed
 
   """
+  defp mapify([key, value]) when is_bitstring(value), do: %{key => Poison.Parser.parse!(value)}
+  defp mapify(msg) when is_list(msg), do: Map.new(msg, fn [k, v] -> {k, mapify(v)} end)
+
+  defp format_results(msg), do: Enum.map(msg, fn [k, v] -> %{k => mapify(v)} end)
+
   @spec command(GenServer.server(), command, Keyword.t()) ::
           {:ok, Redix.Protocol.redis_value()} | {:error, atom | Redix.Error.t()}
-  def command(conn, command, opts \\ []) do
+  def command(conn, command, opts \\ [])
+  def command(conn, ["XRANGE", _stream, _val, _opt] = command, opts) do
     case pipeline(conn, [command], opts) do
       {:ok, [%Redix.Error{} = error]} ->
         raise error
+      {:ok, [resp]} ->
+        resp = format_results(resp)
+        {:ok, resp}
 
+      {:error, _reason} = error ->
+        error
+    end
+  end
+  def command(conn, command, opts) do
+    case pipeline(conn, [command], opts) do
+      {:ok, [%Redix.Error{} = error]} ->
+        raise error
       {:ok, [resp]} ->
         {:ok, resp}
 
